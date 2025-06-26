@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D3.js 地球儀</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson@3"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .title {
+            color: #fff;
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            letter-spacing: 2px;
+        }
+
+        .globe-container {
+            position: relative;
+            border-radius: 50%;
+            box-shadow: 
+                0 0 50px rgba(135, 206, 250, 0.3),
+                inset 0 0 50px rgba(0, 0, 0, 0.3);
+            background: radial-gradient(circle at 30% 30%, rgba(135, 206, 250, 0.1), transparent 70%);
+        }
+
+        .countries {
+            fill: #4a9eff;
+            stroke: #ffffff;
+            stroke-width: 0.5px;
+            opacity: 0.8;
+        }
+
+        .countries:hover {
+            fill: #ff6b6b;
+            opacity: 1;
+        }
+
+        .sphere {
+            fill: #001122;
+            stroke: #ffffff;
+            stroke-width: 1px;
+            opacity: 0.1;
+        }
+
+        .graticule {
+            fill: none;
+            stroke: #ffffff;
+            stroke-width: 0.5px;
+            opacity: 0.2;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: -80px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .control-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 255, 255, 0.2);
+        }
+
+        .speed-control {
+            color: white;
+            font-size: 14px;
+        }
+
+        .speed-slider {
+            width: 100px;
+            margin: 0 10px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            pointer-events: none;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">互動式地球儀</h1>
+        <div class="globe-container" id="globe"></div>
+        <div class="controls">
+            <button class="control-btn" id="playPause">暫停旋轉</button>
+            <button class="control-btn" id="resetView">重設視角</button>
+            <div class="speed-control">
+                <span>速度:</span>
+                <input type="range" class="speed-slider" id="speedSlider" min="0" max="5" value="1" step="0.1">
+            </div>
+        </div>
+    </div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        // 設定尺寸
+        const width = 600;
+        const height = 600;
+        const radius = 250;
+
+        // 創建 SVG
+        const svg = d3.select("#globe")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // 創建投影
+        const projection = d3.geoOrthographic()
+            .scale(radius)
+            .translate([width / 2, height / 2])
+            .clipAngle(90);
+
+        // 創建路徑生成器
+        const path = d3.geoPath()
+            .projection(projection);
+
+        // 創建經緯網格
+        const graticule = d3.geoGraticule();
+
+        // 添加球體背景
+        svg.append("path")
+            .datum({type: "Sphere"})
+            .attr("class", "sphere")
+            .attr("d", path);
+
+        // 添加經緯網格
+        svg.append("path")
+            .datum(graticule)
+            .attr("class", "graticule")
+            .attr("d", path);
+
+        // 旋轉變數
+        let rotation = [0, 0];
+        let isRotating = true;
+        let rotationSpeed = 1;
+
+        // 載入並顯示地圖數據
+        d3.json("world.geojson.txt").then(function(world) {
+            // 添加國家
+            const countries = svg.selectAll(".country")
+                .data(world.features)
+                .enter()
+                .append("path")
+                .attr("class", "countries country")
+                .attr("d", path)
+                .on("mouseover", function(event, d) {
+                    // 顯示國家名稱
+                    const tooltip = d3.select("#tooltip");
+                    tooltip.style("opacity", 1)
+                        .html(d.properties.NAME || d.properties.name || "未知國家")
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 10) + "px");
+                })
+                .on("mouseout", function() {
+                    d3.select("#tooltip").style("opacity", 0);
+                });
+
+            // 開始旋轉動畫
+            function rotate() {
+                if (isRotating) {
+                    rotation[0] += rotationSpeed * 0.5;
+                    projection.rotate(rotation);
+                    
+                    svg.selectAll("path")
+                        .attr("d", path);
+                }
+                requestAnimationFrame(rotate);
+            }
+            rotate();
+
+        }).catch(function(error) {
+            console.log("載入 world.geojson.txt 失敗，嘗試載入另一個檔案...");
+            
+            // 如果第一個檔案載入失敗，嘗試載入另一個
+            d3.json("ne_110m_admin_0_countries.geojson.txt").then(function(world) {
+                const countries = svg.selectAll(".country")
+                    .data(world.features)
+                    .enter()
+                    .append("path")
+                    .attr("class", "countries country")
+                    .attr("d", path)
+                    .on("mouseover", function(event, d) {
+                        const tooltip = d3.select("#tooltip");
+                        tooltip.style("opacity", 1)
+                            .html(d.properties.NAME || d.properties.name || "未知國家")
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 10) + "px");
+                    })
+                    .on("mouseout", function() {
+                        d3.select("#tooltip").style("opacity", 0);
+                    });
+
+                function rotate() {
+                    if (isRotating) {
+                        rotation[0] += rotationSpeed * 0.5;
+                        projection.rotate(rotation);
+                        
+                        svg.selectAll("path")
+                            .attr("d", path);
+                    }
+                    requestAnimationFrame(rotate);
+                }
+                rotate();
+            }).catch(function(error) {
+                console.error("無法載入地圖數據:", error);
+                // 如果兩個檔案都載入失敗，創建一個簡單的地球儀
+                svg.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height / 2)
+                    .attr("text-anchor", "middle")
+                    .attr("fill", "white")
+                    .text("無法載入地圖數據");
+            });
+        });
+
+        // 拖拽功能
+        const drag = d3.drag()
+            .on("start", function() {
+                isRotating = false;
+            })
+            .on("drag", function(event) {
+                const rotate = projection.rotate();
+                const k = 75 / projection.scale();
+                projection.rotate([
+                    rotate[0] + event.dx * k,
+                    rotate[1] - event.dy * k
+                ]);
+                svg.selectAll("path").attr("d", path);
+            })
+            .on("end", function() {
+                rotation = projection.rotate();
+            });
+
+        svg.call(drag);
+
+        // 控制按鈕
+        d3.select("#playPause").on("click", function() {
+            isRotating = !isRotating;
+            d3.select(this).text(isRotating ? "暫停旋轉" : "開始旋轉");
+        });
+
+        d3.select("#resetView").on("click", function() {
+            rotation = [0, 0];
+            projection.rotate(rotation);
+            svg.selectAll("path").attr("d", path);
+        });
+
+        d3.select("#speedSlider").on("input", function() {
+            rotationSpeed = +this.value;
+        });
+
+        // 縮放功能
+        svg.on("wheel", function(event) {
+            event.preventDefault();
+            const scale = projection.scale();
+            const newScale = scale * (1 - event.deltaY * 0.001);
+            projection.scale(Math.max(100, Math.min(800, newScale)));
+            svg.selectAll("path").attr("d", path);
+        });
+    </script>
+</body>
+</html> 
